@@ -8,6 +8,7 @@ import "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 // 简单Mock Token实现
 contract MockERC20 is ERC20 {
     constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
+
     function mint(address to, uint256 amount) public {
         _mint(to, amount);
     }
@@ -20,7 +21,6 @@ contract APIPaymentTest is Test {
     address owner = address(0x1);
     address signer;
     address alice = address(0x3);
-    
 
     function setUp() public {
         usdc = new MockERC20("USDC", "USDC");
@@ -54,16 +54,8 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
-        bytes32 structHash = keccak256(
-            abi.encode(
-                payment.WITHDRAW_TYPEHASH(),
-                alice,
-                address(usdc),
-                amount,
-                nonce,
-                validBeforeBlock
-            )
-        );
+        bytes32 structHash =
+            keccak256(abi.encode(payment.WITHDRAW_TYPEHASH(), alice, address(usdc), amount, nonce, validBeforeBlock));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", payment.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
@@ -71,7 +63,7 @@ contract APIPaymentTest is Test {
         // console.logBytes32(structHash);
         // console.logBytes32(digest);
         // console.logBytes32(payment.WITHDRAW_TYPEHASH());
-        
+
         // withdraw
         payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
 
@@ -145,20 +137,11 @@ contract APIPaymentTest is Test {
         payment.deposit(100e6, address(usdc));
         assertEq(usdc.balanceOf(alice), 1_000_000e6 - 100e6);
 
-
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
-        bytes32 structHash = keccak256(
-            abi.encode(
-                payment.WITHDRAW_TYPEHASH(),
-                alice,
-                address(usdc),
-                amount,
-                nonce,
-                validBeforeBlock
-            )
-        );
+        bytes32 structHash =
+            keccak256(abi.encode(payment.WITHDRAW_TYPEHASH(), alice, address(usdc), amount, nonce, validBeforeBlock));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", payment.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(55, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
@@ -247,16 +230,8 @@ contract APIPaymentTest is Test {
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
         // 用错误的私钥签名
-        bytes32 structHash = keccak256(
-            abi.encode(
-                payment.WITHDRAW_TYPEHASH(),
-                alice,
-                address(usdc),
-                amount,
-                nonce,
-                validBeforeBlock
-            )
-        );
+        bytes32 structHash =
+            keccak256(abi.encode(payment.WITHDRAW_TYPEHASH(), alice, address(usdc), amount, nonce, validBeforeBlock));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", payment.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(99, digest); // 错误私钥
         bytes memory sig = abi.encodePacked(r, s, v);
@@ -276,16 +251,8 @@ contract APIPaymentTest is Test {
 
         // 用bob地址构造签名
         address bob = address(0xB0B);
-        bytes32 structHash = keccak256(
-            abi.encode(
-                payment.WITHDRAW_TYPEHASH(),
-                bob,
-                address(usdc),
-                amount,
-                nonce,
-                validBeforeBlock
-            )
-        );
+        bytes32 structHash =
+            keccak256(abi.encode(payment.WITHDRAW_TYPEHASH(), bob, address(usdc), amount, nonce, validBeforeBlock));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", payment.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest); // 签名没问题
         bytes memory sig = abi.encodePacked(r, s, v);
@@ -354,7 +321,7 @@ contract APIPaymentTest is Test {
     function testNoReentrancy() public {
         // 部署攻击合约
         ReentrantAttack attacker = new ReentrantAttack(address(payment), address(usdc));
-        
+
         // 设置环境
         vm.startPrank(alice);
         usdc.approve(address(payment), 10e6);
@@ -374,31 +341,19 @@ contract APIPaymentTest is Test {
         // 检查
         assertEq(payment.userNonce(address(attacker)), 1);
         assertEq(usdc.balanceOf(address(attacker)), 11e6);
-
     }
 
-    function signWithdraw(
-        address user,
-        address token,
-        uint256 amount,
-        uint256 nonce,
-        uint256 validBeforeBlock
-    ) internal view returns (bytes memory) {
-        bytes32 structHash = keccak256(
-            abi.encode(
-                payment.WITHDRAW_TYPEHASH(),
-                user,
-                token,
-                amount,
-                nonce,
-                validBeforeBlock
-            )
-        );
+    function signWithdraw(address user, address token, uint256 amount, uint256 nonce, uint256 validBeforeBlock)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 structHash =
+            keccak256(abi.encode(payment.WITHDRAW_TYPEHASH(), user, token, amount, nonce, validBeforeBlock));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", payment.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest);
         return abi.encodePacked(r, s, v);
     }
-
 }
 
 // 重入攻击合约

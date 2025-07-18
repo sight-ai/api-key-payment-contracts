@@ -3,10 +3,10 @@ pragma solidity ^0.8.20;
 
 // import "forge-std/console.sol";
 
-import { IERC20 } from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-import { SafeERC20 } from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
-import { ECDSA } from "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
-import { Ownable } from "openzeppelin-contracts/contracts/access/Ownable.sol";
+import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ECDSA} from "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
+import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 
 contract APIPayment is Ownable {
     using SafeERC20 for IERC20;
@@ -25,11 +25,12 @@ contract APIPayment is Ownable {
 
     // EIP-712域名分隔 ———— 如果只有这个的payment，可能不需要
     bytes32 public DOMAIN_SEPARATOR;
-    bytes32 public constant WITHDRAW_TYPEHASH = keccak256("Withdraw(address recipient,address token,uint256 amount,uint256 nonce,uint256 validBeforeBlock)");
+    bytes32 public constant WITHDRAW_TYPEHASH =
+        keccak256("Withdraw(address recipient,address token,uint256 amount,uint256 nonce,uint256 validBeforeBlock)");
 
     constructor(address[] memory tokens, address _trustedSigner, address _owner) Ownable(_owner) {
         // 初始化支持的token
-        for (uint i = 0; i < tokens.length; i++) {
+        for (uint256 i = 0; i < tokens.length; i++) {
             supportedTokens[tokens[i]] = true;
         }
         trustedSigner = _trustedSigner;
@@ -64,33 +65,23 @@ contract APIPayment is Ownable {
     }
 
     // withdraw（user/provider claim）
-    function withdraw(
-        address token,
-        uint256 amount,
-        uint256 nonce,
-        uint256 validBeforeBlock,
-        bytes calldata signature
-    ) external {
+    function withdraw(address token, uint256 amount, uint256 nonce, uint256 validBeforeBlock, bytes calldata signature)
+        external
+    {
         require(supportedTokens[token], "Token not supported");
         require(block.number <= validBeforeBlock, "Signature expired");
         require(nonce == userNonce[msg.sender] + 1, "Invalid nonce");
 
         // 组装 hash（EIP-712）
-        bytes32 structHash = keccak256(abi.encode(
-            WITHDRAW_TYPEHASH,
-            msg.sender,
-            token,
-            amount,
-            nonce,
-            validBeforeBlock
-        ));
+        bytes32 structHash =
+            keccak256(abi.encode(WITHDRAW_TYPEHASH, msg.sender, token, amount, nonce, validBeforeBlock));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
         address signer = ECDSA.recover(digest, signature);
-        
+
         // For test
         // console.logBytes32(structHash);
         // console.logBytes32(digest);
-        
+
         require(signer == trustedSigner, "Invalid signature");
 
         userNonce[msg.sender] = nonce; // 先更新nonce再转账，防重入
