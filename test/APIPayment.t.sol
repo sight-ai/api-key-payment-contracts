@@ -5,7 +5,6 @@ import "forge-std/Test.sol";
 import "../src/APIPayment.sol";
 import "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 
-// 简单Mock Token实现
 contract MockERC20 is ERC20 {
     constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
 
@@ -21,50 +20,72 @@ contract APIPaymentTest is Test {
     address owner = address(0x1);
     address signer;
     address alice = address(0x3);
+    address[] emergencyAdmins;
+
+    string constant NAME = "API Payment";
+    string constant VERSION = "1";
+
+    // 测试手动拼 EIP，合约内部是_hashTypedDataV4
+    function domainSeparator() internal view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256(bytes(NAME)),
+                keccak256(bytes(VERSION)),
+                block.chainid,
+                address(payment)
+            )
+        );
+    }
+
+    function signWithdraw(address user, address token, uint256 amount, uint256 nonce, uint256 validBeforeBlock)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 typehash = payment.WITHDRAW_TYPEHASH();
+        bytes32 structHash =
+            keccak256(abi.encode(typehash, user, token, amount, nonce, validBeforeBlock));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest);
+        return abi.encodePacked(r, s, v);
+    }
 
     function setUp() public {
         usdc = new MockERC20("USDC", "USDC");
         usdt = new MockERC20("USDT", "USDT");
-
         signer = vm.addr(2);
 
         // fund alice account
         usdc.mint(alice, 1_000_000e6);
         usdt.mint(alice, 1_000_000e6);
 
-        // depoly
-        address[] memory tokens = new address[](2);
+        // admin
+        emergencyAdmins = new address[](2) ;
+        emergencyAdmins[0] = address(0x10);
+        emergencyAdmins[1] = address(0x11);
+
+        // deploy
+        address[] memory tokens = new address[](2) ;
         tokens[0] = address(usdc);
         tokens[1] = address(usdt);
 
-        payment = new APIPayment(tokens, signer, owner);
+        payment = new APIPayment(tokens, signer, owner, emergencyAdmins);
     }
 
     function testDepositAndWithdraw() public {
         vm.startPrank(alice);
 
-        // approve 合约
         usdc.approve(address(payment), 100e6);
 
-        // deposit
         payment.deposit(100e6, address(usdc));
         assertEq(usdc.balanceOf(address(payment)), 100e6);
 
-        // 链下生成withdraw签名，链上claim
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
-        bytes32 structHash =
-            keccak256(abi.encode(payment.WITHDRAW_TYPEHASH(), alice, address(usdc), amount, nonce, validBeforeBlock));
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", payment.DOMAIN_SEPARATOR(), structHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest);
-        bytes memory sig = abi.encodePacked(r, s, v);
+        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
 
-        // console.logBytes32(structHash);
-        // console.logBytes32(digest);
-        // console.logBytes32(payment.WITHDRAW_TYPEHASH());
-
-        // withdraw
         payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
 
         assertEq(usdc.balanceOf(alice), 1_000_000e6 - 100e6 + amount);
@@ -130,21 +151,26 @@ contract APIPaymentTest is Test {
         vm.startPrank(owner);
         address newSigner = vm.addr(55);
         payment.setTrustedSigner(newSigner);
-        // 不能直接assert private var，需额外getter或事件，可测试无revert
-        // 测试用这个的私钥可以成功提现
+
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
         payment.deposit(100e6, address(usdc));
+
         assertEq(usdc.balanceOf(alice), 1_000_000e6 - 100e6);
 
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
+
+        // 用新signer签名
+        bytes32 typehash = payment.WITHDRAW_TYPEHASH();
         bytes32 structHash =
-            keccak256(abi.encode(payment.WITHDRAW_TYPEHASH(), alice, address(usdc), amount, nonce, validBeforeBlock));
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", payment.DOMAIN_SEPARATOR(), structHash));
+            keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(55, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
+
+        // 用旧signer签名应该失败
         bytes memory sig2 = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
 
         vm.expectRevert("Invalid signature");
@@ -230,10 +256,11 @@ contract APIPaymentTest is Test {
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
         // 用错误的私钥签名
+        bytes32 typehash = payment.WITHDRAW_TYPEHASH();
         bytes32 structHash =
-            keccak256(abi.encode(payment.WITHDRAW_TYPEHASH(), alice, address(usdc), amount, nonce, validBeforeBlock));
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", payment.DOMAIN_SEPARATOR(), structHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(99, digest); // 错误私钥
+            keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(99, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
 
         vm.expectRevert("Invalid signature");
@@ -249,16 +276,15 @@ contract APIPaymentTest is Test {
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
 
-        // 用bob地址构造签名
         address bob = address(0xB0B);
+        bytes32 typehash = payment.WITHDRAW_TYPEHASH();
         bytes32 structHash =
-            keccak256(abi.encode(payment.WITHDRAW_TYPEHASH(), bob, address(usdc), amount, nonce, validBeforeBlock));
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", payment.DOMAIN_SEPARATOR(), structHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest); // 签名没问题
+            keccak256(abi.encode(typehash, bob, address(usdc), amount, nonce, validBeforeBlock));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
 
-        // alice用bob的签名去提（不通过，因为msg.sender!=bob）
-        vm.expectRevert("Invalid signature"); // 或"Invalid nonce"
+        vm.expectRevert("Invalid signature");
         payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
         vm.stopPrank();
     }
@@ -266,30 +292,25 @@ contract APIPaymentTest is Test {
     function testWithdrawNoncePerUser() public {
         address bob = address(0xB0B);
 
-        // bob充值
         usdc.mint(bob, 100e6);
         vm.startPrank(bob);
         usdc.approve(address(payment), 100e6);
         payment.deposit(100e6, address(usdc));
         vm.stopPrank();
 
-        // alice充值
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
         payment.deposit(100e6, address(usdc));
-        // alice nonce=1
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
         bytes memory sigAlice = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
         payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sigAlice);
 
-        // alice再用nonce=1
         vm.expectRevert("Invalid nonce");
         payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sigAlice);
         vm.stopPrank();
 
-        // bob也用nonce=1（自己的）
         vm.startPrank(bob);
         assertEq(payment.userNonce(bob), 0);
         bytes memory sigBob = signWithdraw(bob, address(usdc), amount, nonce, validBeforeBlock);
@@ -304,14 +325,12 @@ contract APIPaymentTest is Test {
         payment.deposit(100e6, address(usdc));
 
         uint256 correctAmount = 10e6;
-        uint256 wrongAmount = 11e6; // 实际要提取的错误金额
+        uint256 wrongAmount = 11e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
 
-        // 用正确参数签名
         bytes memory sig = signWithdraw(alice, address(usdc), correctAmount, nonce, validBeforeBlock);
 
-        // 用错误的amount参数去提现（应该revert）
         vm.expectRevert("Invalid signature");
         payment.withdraw(address(usdc), wrongAmount, nonce, validBeforeBlock, sig);
 
@@ -319,44 +338,96 @@ contract APIPaymentTest is Test {
     }
 
     function testNoReentrancy() public {
-        // 部署攻击合约
         ReentrantAttack attacker = new ReentrantAttack(address(payment), address(usdc));
 
-        // 设置环境
         vm.startPrank(alice);
         usdc.approve(address(payment), 10e6);
         payment.deposit(10e6, address(usdc));
         usdc.transfer(address(attacker), 10e6);
         vm.stopPrank();
 
-        // 正常签名
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
         bytes memory sig = signWithdraw(address(attacker), address(usdc), 1e6, nonce, validBeforeBlock);
 
-        // 攻击
-        // 只要withdraw先更新nonce，reentry时会被nonce拦截，攻击失败
         attacker.attack(sig, nonce, validBeforeBlock);
 
-        // 检查
         assertEq(payment.userNonce(address(attacker)), 1);
         assertEq(usdc.balanceOf(address(attacker)), 11e6);
     }
 
-    function signWithdraw(address user, address token, uint256 amount, uint256 nonce, uint256 validBeforeBlock)
-        internal
-        view
-        returns (bytes memory)
-    {
-        bytes32 structHash =
-            keccak256(abi.encode(payment.WITHDRAW_TYPEHASH(), user, token, amount, nonce, validBeforeBlock));
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", payment.DOMAIN_SEPARATOR(), structHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest);
-        return abi.encodePacked(r, s, v);
+        function testPauseByMajorityAdmin() public {
+        // 两个emergencyAdmins, 2/3 规则即都同意才可pause
+        // 1号投票
+        vm.prank(address(0x10));
+        payment.votePause();
+        assertFalse(payment.paused(), "Paused too early");
+        // 2号投票
+        vm.prank(address(0x11));
+        payment.votePause();
+        assertTrue(payment.paused(), "Should be paused after 2 votes");
+    }
+
+    function testPauseNotEnoughVotes() public {
+        // 只有一个admin投票，不足多数，不能pause
+        vm.prank(address(0x10));
+        payment.votePause();
+        assertFalse(payment.paused(), "Should NOT be paused with only one vote");
+    }
+
+    function testUnpauseByAdmin() public {
+        // 两票pause
+        vm.prank(address(0x10));
+        payment.votePause();
+        vm.prank(address(0x11));
+        payment.votePause();
+        assertTrue(payment.paused(), "Should be paused now");
+
+        // 取消1票, 应可unpause
+        vm.prank(address(0x11));
+        payment.voteUnpause();
+        assertFalse(payment.paused(), "Should be unpaused when votes < 2/3");
+    }
+
+    function testPauseDisablesDepositAndWithdraw() public {
+        // 两票pause
+        vm.prank(address(0x10));
+        payment.votePause();
+        vm.prank(address(0x11));
+        payment.votePause();
+        assertTrue(payment.paused(), "Should be paused");
+
+        vm.startPrank(alice);
+        usdc.approve(address(payment), 100e6);
+        vm.expectRevert("EnforcedPause()");
+        payment.deposit(100e6, address(usdc));
+
+        uint256 amount = 10e6;
+        uint256 nonce = 1;
+        uint256 validBeforeBlock = block.number + 100;
+        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
+        vm.expectRevert("EnforcedPause()");
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
+        vm.stopPrank();
+    }
+
+    // 测试切换到_hashTypedDataV4后，合约正确工作
+    function testEIP712TypedDataSignatureWorks() public {
+        // 测试EIP712切换后签名有效
+        vm.startPrank(alice);
+        usdc.approve(address(payment), 100e6);
+        payment.deposit(100e6, address(usdc));
+        uint256 amount = 10e6;
+        uint256 nonce = 1;
+        uint256 validBeforeBlock = block.number + 100;
+        // 用主流程 signWithdraw 即为EIP712格式
+        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
+        assertEq(usdc.balanceOf(alice), 1_000_000e6 - 100e6 + amount);
+        vm.stopPrank();
     }
 }
 
-// 重入攻击合约
 contract ReentrantAttack {
     APIPayment public payment;
     IERC20 public usdc;
@@ -371,7 +442,6 @@ contract ReentrantAttack {
         attacker = msg.sender;
     }
 
-    // 重入发生在 receive hook
     function attack(bytes memory sig, uint256 nonce, uint256 validBeforeBlock) public {
         lastSig = sig;
         lastNonce = nonce;
@@ -379,10 +449,7 @@ contract ReentrantAttack {
         payment.withdraw(address(usdc), 1e6, nonce, validBeforeBlock, sig);
     }
 
-    // fallback，尝试重入
     receive() external payable {
-        // 在这里再次调用 withdraw
-        // 只要nonce更新在转账前，这里会revert
         try payment.withdraw(address(usdc), 1e6, lastNonce, lastBlock, lastSig) {
             revert("Should not succeed");
         } catch {}

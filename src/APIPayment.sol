@@ -7,8 +7,10 @@ import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
 import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
+import {EIP712} from "openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol";
+import {Pausable} from "openzeppelin-contracts/contracts/utils/Pausable.sol";
 
-contract APIPayment is Ownable {
+contract APIPayment is Ownable, Pausable, EIP712 {
     using SafeERC20 for IERC20;
 
     // 支持的token
@@ -20,30 +22,32 @@ contract APIPayment is Ownable {
     // 用户 withdraw nonce
     mapping(address => uint256) public userNonce;
 
+    // 多签紧急管理员，目前使用：简单数组+批准
+    // TODO 修改为Gnosis safe
+    address[] public emergencyAdmins;
+    mapping(address => bool) public isEmergencyAdmin;
+    uint256 public pauseVotes;
+    mapping(address => bool) public hasVotedPause;
+
     event Deposit(address indexed user, address indexed token, uint256 amount);
     event Withdraw(address indexed user, address indexed token, uint256 amount, uint256 nonce);
+    event PauseVote(address admin, uint256 votes, bool paused);
 
-    // EIP-712域名分隔 ———— 如果只有这个的payment，可能不需要
-    bytes32 public DOMAIN_SEPARATOR;
+    // EIP 712
     bytes32 public constant WITHDRAW_TYPEHASH =
         keccak256("Withdraw(address recipient,address token,uint256 amount,uint256 nonce,uint256 validBeforeBlock)");
 
-    constructor(address[] memory tokens, address _trustedSigner, address _owner) Ownable(_owner) {
+    constructor(address[] memory tokens, address _trustedSigner, address _owner, address[] memory _emergencyAdmins) Ownable(_owner) EIP712("API Payment", "1") {
         // 初始化支持的token
         for (uint256 i = 0; i < tokens.length; i++) {
             supportedTokens[tokens[i]] = true;
         }
         trustedSigner = _trustedSigner;
-        // 初始化 EIP-712 域名分隔
-        DOMAIN_SEPARATOR = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256(bytes("API Payment")),
-                keccak256(bytes("1")),
-                block.chainid,
-                address(this)
-            )
-        );
+        // 初始化紧急管理员
+        for (uint256 i = 0; i < _emergencyAdmins.length; i++) {
+            emergencyAdmins.push(_emergencyAdmins[i]);
+            isEmergencyAdmin[_emergencyAdmins[i]] = true;
+        }
     }
 
     // 支持 owner 添加/移除支持的 token
@@ -55,8 +59,33 @@ contract APIPayment is Ownable {
         trustedSigner = _trustedSigner;
     }
 
+    // 紧急管理
+    // 2/3 多签投票暂停
+    function votePause() external {
+        require(isEmergencyAdmin[msg.sender], "Not admin");
+        require(!hasVotedPause[msg.sender], "Already voted");
+        hasVotedPause[msg.sender] = true;
+        pauseVotes++;
+        emit PauseVote(msg.sender, pauseVotes, false);
+
+        if (pauseVotes * 3 >= emergencyAdmins.length * 2) {
+            _pause();
+            emit PauseVote(msg.sender, pauseVotes, true);
+        }
+    }
+
+    function voteUnpause() external {
+        require(isEmergencyAdmin[msg.sender], "Not admin");
+        require(hasVotedPause[msg.sender], "Did not vote yet");
+        hasVotedPause[msg.sender] = false;
+        if (pauseVotes > 0) pauseVotes--;
+        if (paused() && pauseVotes * 3 < emergencyAdmins.length * 2) {
+            _unpause();
+        }
+    }
+
     // deposit
-    function deposit(uint256 amount, address token) external {
+    function deposit(uint256 amount, address token) external whenNotPaused {
         require(supportedTokens[token], "Token not supported");
         require(amount > 0, "Amount must be positive");
         // transferFrom
@@ -66,7 +95,7 @@ contract APIPayment is Ownable {
 
     // withdraw（user/provider claim）
     function withdraw(address token, uint256 amount, uint256 nonce, uint256 validBeforeBlock, bytes calldata signature)
-        external
+        external whenNotPaused
     {
         require(supportedTokens[token], "Token not supported");
         require(block.number <= validBeforeBlock, "Signature expired");
@@ -75,7 +104,7 @@ contract APIPayment is Ownable {
         // 组装 hash（EIP-712）
         bytes32 structHash =
             keccak256(abi.encode(WITHDRAW_TYPEHASH, msg.sender, token, amount, nonce, validBeforeBlock));
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        bytes32 digest = _hashTypedDataV4(structHash);
         address signer = ECDSA.recover(digest, signature);
 
         // For test
