@@ -35,8 +35,9 @@ contract APIPayment is Ownable, Pausable, EIP712 {
     event PauseVote(address admin, uint256 votes, bool paused);
 
     // EIP 712
-    bytes32 public constant WITHDRAW_TYPEHASH =
-        keccak256("Withdraw(address recipient,address token,uint256 amount,uint256 nonce,uint256 validBeforeBlock,uint256 timestamp)");
+    bytes32 public constant WITHDRAW_TYPEHASH = keccak256(
+        "Withdraw(address recipient,address token,uint256 amount,uint256 nonce,uint256 validBeforeBlock,uint256 timestamp)"
+    );
 
     constructor(address[] memory tokens, address _trustedSigner, address[] memory _emergencyAdmins, address _owner)
         Ownable(_owner)
@@ -98,10 +99,14 @@ contract APIPayment is Ownable, Pausable, EIP712 {
     }
 
     // withdraw（user/provider claim）
-    function withdraw(address token, uint256 amount, uint256 nonce, uint256 validBeforeBlock, uint256 timestamp, bytes calldata signature)
-        external
-        whenNotPaused
-    {
+    function withdraw(
+        address token,
+        uint256 amount,
+        uint256 nonce,
+        uint256 validBeforeBlock,
+        uint256 timestamp,
+        bytes calldata signature
+    ) external whenNotPaused {
         require(supportedTokens[token], "Token not supported");
         require(block.number <= validBeforeBlock, "Signature expired");
         require(nonce == userNonce[msg.sender] + 1, "Invalid nonce");

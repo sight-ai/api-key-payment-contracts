@@ -31,7 +31,6 @@ contract Deploy is Script {
         console.log("trustedSigner: %s", trustedSigner);
         console.log("owner:        %s", owner);
 
-
         APIPayment pay = new APIPayment(tokens, trustedSigner, emergencyAdmins, owner);
 
         console.log("USDC: %s", address(usdc));

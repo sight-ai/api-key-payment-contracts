@@ -38,11 +38,14 @@ contract APIPaymentTest is Test {
         );
     }
 
-    function signWithdraw(address user, address token, uint256 amount, uint256 nonce, uint256 validBeforeBlock, uint256 timestamp)
-        internal
-        view
-        returns (bytes memory)
-    {
+    function signWithdraw(
+        address user,
+        address token,
+        uint256 amount,
+        uint256 nonce,
+        uint256 validBeforeBlock,
+        uint256 timestamp
+    ) internal view returns (bytes memory) {
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
         bytes32 structHash = keccak256(abi.encode(typehash, user, token, amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
@@ -167,7 +170,8 @@ contract APIPaymentTest is Test {
 
         // 用新signer签名
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
-        bytes32 structHash = keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock, timestamp));
+        bytes32 structHash =
+            keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(55, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
@@ -263,7 +267,8 @@ contract APIPaymentTest is Test {
         uint256 timestamp = block.timestamp;
         // 用错误的私钥签名
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
-        bytes32 structHash = keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock, timestamp));
+        bytes32 structHash =
+            keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(99, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
@@ -284,7 +289,8 @@ contract APIPaymentTest is Test {
 
         address bob = address(0xB0B);
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
-        bytes32 structHash = keccak256(abi.encode(typehash, bob, address(usdc), amount, nonce, validBeforeBlock, timestamp));
+        bytes32 structHash =
+            keccak256(abi.encode(typehash, bob, address(usdc), amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
