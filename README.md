@@ -9,52 +9,19 @@ forge build
 forge test
 ```
 
-### Build
-
-```shell
-$ forge build
+### how to deploy locally
 ```
+// run local network (http://127.0.0.1:8545)
+anvil
 
-### Test
+// pick one private key from local network as your owner and trustSigner, write it in the env 
+// !!! pick one from anvil network, not your own wallet
+// assume your private key is 0xXXXXX
+export PRIVATE_KEY=<0xXXXXX>
 
-```shell
-$ forge test
-```
 
-### Format
+// run depoly scripts
+forge script script/Deploy.s.sol --tc Deploy --rpc-url http://127.0.0.1:8545 --broadcast --private-key $PRIVATE_KEY
 
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
+// then you can get the owner, signer, MockERC20 contract address, API payment contract address
 ```
