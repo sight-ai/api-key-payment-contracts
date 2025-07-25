@@ -30,14 +30,18 @@ contract APIPayment is Ownable, Pausable, EIP712 {
     mapping(address => bool) public hasVotedPause;
 
     event Deposit(address indexed user, address indexed token, uint256 amount);
-    event Withdraw(address indexed user, address indexed token, uint256 amount, uint256 nonce);
+    event Withdraw(address indexed user, address indexed token, uint256 amount, uint256 nonce, uint256 timestamp);
+    event WithdrawDebug(bytes32 digest, address signer, address trustSigner);
     event PauseVote(address admin, uint256 votes, bool paused);
 
     // EIP 712
     bytes32 public constant WITHDRAW_TYPEHASH =
-        keccak256("Withdraw(address recipient,address token,uint256 amount,uint256 nonce,uint256 validBeforeBlock)");
+        keccak256("Withdraw(address recipient,address token,uint256 amount,uint256 nonce,uint256 validBeforeBlock,uint256 timestamp)");
 
-    constructor(address[] memory tokens, address _trustedSigner, address _owner, address[] memory _emergencyAdmins) Ownable(_owner) EIP712("API Payment", "1") {
+    constructor(address[] memory tokens, address _trustedSigner, address[] memory _emergencyAdmins, address _owner)
+        Ownable(_owner)
+        EIP712("API_PAYMENT", "1")
+    {
         // 初始化支持的token
         for (uint256 i = 0; i < tokens.length; i++) {
             supportedTokens[tokens[i]] = true;
@@ -94,8 +98,9 @@ contract APIPayment is Ownable, Pausable, EIP712 {
     }
 
     // withdraw（user/provider claim）
-    function withdraw(address token, uint256 amount, uint256 nonce, uint256 validBeforeBlock, bytes calldata signature)
-        external whenNotPaused
+    function withdraw(address token, uint256 amount, uint256 nonce, uint256 validBeforeBlock, uint256 timestamp, bytes calldata signature)
+        external
+        whenNotPaused
     {
         require(supportedTokens[token], "Token not supported");
         require(block.number <= validBeforeBlock, "Signature expired");
@@ -103,20 +108,16 @@ contract APIPayment is Ownable, Pausable, EIP712 {
 
         // 组装 hash（EIP-712）
         bytes32 structHash =
-            keccak256(abi.encode(WITHDRAW_TYPEHASH, msg.sender, token, amount, nonce, validBeforeBlock));
+            keccak256(abi.encode(WITHDRAW_TYPEHASH, msg.sender, token, amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = _hashTypedDataV4(structHash);
         address signer = ECDSA.recover(digest, signature);
-
-        // For test
-        // console.logBytes32(structHash);
-        // console.logBytes32(digest);
-
+        emit WithdrawDebug(digest, signer, trustedSigner); // 新增调试事件
         require(signer == trustedSigner, "Invalid signature");
 
         userNonce[msg.sender] = nonce; // 先更新nonce再转账，防重入
         IERC20(token).safeTransfer(msg.sender, amount);
 
-        emit Withdraw(msg.sender, token, amount, nonce);
+        emit Withdraw(msg.sender, token, amount, nonce, timestamp);
     }
 
     // owner可以转账合约中的balance

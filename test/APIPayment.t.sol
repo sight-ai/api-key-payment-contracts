@@ -38,14 +38,13 @@ contract APIPaymentTest is Test {
         );
     }
 
-    function signWithdraw(address user, address token, uint256 amount, uint256 nonce, uint256 validBeforeBlock)
+    function signWithdraw(address user, address token, uint256 amount, uint256 nonce, uint256 validBeforeBlock, uint256 timestamp)
         internal
         view
         returns (bytes memory)
     {
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
-        bytes32 structHash =
-            keccak256(abi.encode(typehash, user, token, amount, nonce, validBeforeBlock));
+        bytes32 structHash = keccak256(abi.encode(typehash, user, token, amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest);
         return abi.encodePacked(r, s, v);
@@ -61,16 +60,16 @@ contract APIPaymentTest is Test {
         usdt.mint(alice, 1_000_000e6);
 
         // admin
-        emergencyAdmins = new address[](2) ;
+        emergencyAdmins = new address[](2);
         emergencyAdmins[0] = address(0x10);
         emergencyAdmins[1] = address(0x11);
 
         // deploy
-        address[] memory tokens = new address[](2) ;
+        address[] memory tokens = new address[](2);
         tokens[0] = address(usdc);
         tokens[1] = address(usdt);
 
-        payment = new APIPayment(tokens, signer, owner, emergencyAdmins);
+        payment = new APIPayment(tokens, signer, emergencyAdmins, owner);
     }
 
     function testDepositAndWithdraw() public {
@@ -84,9 +83,11 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
-        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
+        uint256 timestamp = block.timestamp;
 
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
+        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
+
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig);
 
         assertEq(usdc.balanceOf(alice), 1_000_000e6 - 100e6 + amount);
         assertEq(usdc.balanceOf(address(payment)), 100e6 - amount);
@@ -121,14 +122,15 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
-        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
+        uint256 timestamp = block.timestamp;
+        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
 
         vm.recordLogs();
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig);
 
         Vm.Log[] memory entries = vm.getRecordedLogs();
         bool found = false;
-        bytes32 expectedTopic = keccak256("Withdraw(address,address,uint256,uint256)");
+        bytes32 expectedTopic = keccak256("Withdraw(address,address,uint256,uint256,uint256)");
         for (uint256 i = 0; i < entries.length; i++) {
             if (entries[i].topics.length > 0 && entries[i].topics[0] == expectedTopic) {
                 found = true;
@@ -161,22 +163,22 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
+        uint256 timestamp = block.timestamp;
 
         // 用新signer签名
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
-        bytes32 structHash =
-            keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock));
+        bytes32 structHash = keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(55, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
 
         // 用旧signer签名应该失败
-        bytes memory sig2 = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
+        bytes memory sig2 = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
 
         vm.expectRevert("Invalid signature");
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig2);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig2);
 
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig);
 
         assertEq(usdc.balanceOf(alice), 1_000_000e6 - 100e6 + amount);
         assertEq(usdc.balanceOf(address(payment)), 100e6 - amount);
@@ -200,11 +202,12 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
-        bytes memory sig = signWithdraw(alice, address(fakeToken), amount, nonce, validBeforeBlock);
+        uint256 timestamp = block.timestamp;
+        bytes memory sig = signWithdraw(alice, address(fakeToken), amount, nonce, validBeforeBlock, timestamp);
 
         vm.startPrank(alice);
         vm.expectRevert("Token not supported");
-        payment.withdraw(address(fakeToken), amount, nonce, validBeforeBlock, sig);
+        payment.withdraw(address(fakeToken), amount, nonce, validBeforeBlock, timestamp, sig);
         vm.stopPrank();
     }
 
@@ -216,21 +219,22 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
-        bytes memory sig1 = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig1);
+        uint256 timestamp = block.timestamp;
+        bytes memory sig1 = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig1);
 
         // 再次用同样nonce
         vm.expectRevert("Invalid nonce");
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig1);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig1);
 
         // 用更小的nonce
         vm.expectRevert("Invalid nonce");
-        payment.withdraw(address(usdc), amount, nonce - 1, validBeforeBlock, sig1);
+        payment.withdraw(address(usdc), amount, nonce - 1, validBeforeBlock, timestamp, sig1);
 
         // 用更大的nonce
         uint256 nonce2 = 2;
-        bytes memory sig2 = signWithdraw(alice, address(usdc), amount, nonce2, validBeforeBlock);
-        payment.withdraw(address(usdc), amount, nonce2, validBeforeBlock, sig2);
+        bytes memory sig2 = signWithdraw(alice, address(usdc), amount, nonce2, validBeforeBlock, timestamp);
+        payment.withdraw(address(usdc), amount, nonce2, validBeforeBlock, timestamp, sig2);
         vm.stopPrank();
     }
 
@@ -241,10 +245,11 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 1;
-        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
+        uint256 timestamp = block.timestamp;
+        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
         vm.roll(validBeforeBlock + 1); // 跳区块
         vm.expectRevert("Signature expired");
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig);
         vm.stopPrank();
     }
 
@@ -255,16 +260,16 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
+        uint256 timestamp = block.timestamp;
         // 用错误的私钥签名
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
-        bytes32 structHash =
-            keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock));
+        bytes32 structHash = keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(99, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
 
         vm.expectRevert("Invalid signature");
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig);
         vm.stopPrank();
     }
 
@@ -275,17 +280,17 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
+        uint256 timestamp = block.timestamp;
 
         address bob = address(0xB0B);
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
-        bytes32 structHash =
-            keccak256(abi.encode(typehash, bob, address(usdc), amount, nonce, validBeforeBlock));
+        bytes32 structHash = keccak256(abi.encode(typehash, bob, address(usdc), amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
 
         vm.expectRevert("Invalid signature");
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig);
         vm.stopPrank();
     }
 
@@ -304,17 +309,18 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
-        bytes memory sigAlice = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sigAlice);
+        uint256 timestamp = block.timestamp;
+        bytes memory sigAlice = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sigAlice);
 
         vm.expectRevert("Invalid nonce");
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sigAlice);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sigAlice);
         vm.stopPrank();
 
         vm.startPrank(bob);
         assertEq(payment.userNonce(bob), 0);
-        bytes memory sigBob = signWithdraw(bob, address(usdc), amount, nonce, validBeforeBlock);
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sigBob);
+        bytes memory sigBob = signWithdraw(bob, address(usdc), amount, nonce, validBeforeBlock, timestamp);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sigBob);
         assertEq(payment.userNonce(bob), 1);
         vm.stopPrank();
     }
@@ -328,11 +334,12 @@ contract APIPaymentTest is Test {
         uint256 wrongAmount = 11e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
+        uint256 timestamp = block.timestamp;
 
-        bytes memory sig = signWithdraw(alice, address(usdc), correctAmount, nonce, validBeforeBlock);
+        bytes memory sig = signWithdraw(alice, address(usdc), correctAmount, nonce, validBeforeBlock, timestamp);
 
         vm.expectRevert("Invalid signature");
-        payment.withdraw(address(usdc), wrongAmount, nonce, validBeforeBlock, sig);
+        payment.withdraw(address(usdc), wrongAmount, nonce, validBeforeBlock, timestamp, sig);
 
         vm.stopPrank();
     }
@@ -344,11 +351,12 @@ contract APIPaymentTest is Test {
         usdc.approve(address(payment), 10e6);
         payment.deposit(10e6, address(usdc));
         usdc.transfer(address(attacker), 10e6);
+        uint256 timestamp = block.timestamp;
         vm.stopPrank();
 
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
-        bytes memory sig = signWithdraw(address(attacker), address(usdc), 1e6, nonce, validBeforeBlock);
+        bytes memory sig = signWithdraw(address(attacker), address(usdc), 1e6, nonce, validBeforeBlock, timestamp);
 
         attacker.attack(sig, nonce, validBeforeBlock);
 
@@ -356,7 +364,7 @@ contract APIPaymentTest is Test {
         assertEq(usdc.balanceOf(address(attacker)), 11e6);
     }
 
-        function testPauseByMajorityAdmin() public {
+    function testPauseByMajorityAdmin() public {
         // 两个emergencyAdmins, 2/3 规则即都同意才可pause
         // 1号投票
         vm.prank(address(0x10));
@@ -405,9 +413,10 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
-        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
+        uint256 timestamp = block.timestamp;
+        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
         vm.expectRevert("EnforcedPause()");
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig);
         vm.stopPrank();
     }
 
@@ -420,9 +429,10 @@ contract APIPaymentTest is Test {
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
+        uint256 timestamp = block.timestamp;
         // 用主流程 signWithdraw 即为EIP712格式
-        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock);
-        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, sig);
+        bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
+        payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig);
         assertEq(usdc.balanceOf(alice), 1_000_000e6 - 100e6 + amount);
         vm.stopPrank();
     }
@@ -435,6 +445,7 @@ contract ReentrantAttack {
     bytes public lastSig;
     uint256 public lastNonce;
     uint256 public lastBlock;
+    uint256 public lastTimestamp;
 
     constructor(address _payment, address _usdc) {
         payment = APIPayment(_payment);
@@ -446,11 +457,12 @@ contract ReentrantAttack {
         lastSig = sig;
         lastNonce = nonce;
         lastBlock = validBeforeBlock;
-        payment.withdraw(address(usdc), 1e6, nonce, validBeforeBlock, sig);
+        lastTimestamp = block.timestamp;
+        payment.withdraw(address(usdc), 1e6, nonce, validBeforeBlock, lastTimestamp, sig);
     }
 
     receive() external payable {
-        try payment.withdraw(address(usdc), 1e6, lastNonce, lastBlock, lastSig) {
+        try payment.withdraw(address(usdc), 1e6, lastNonce, lastBlock, lastTimestamp, lastSig) {
             revert("Should not succeed");
         } catch {}
     }
