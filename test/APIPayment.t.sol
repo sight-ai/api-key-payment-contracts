@@ -22,7 +22,7 @@ contract APIPaymentTest is Test {
     address alice = address(0x3);
     address[] emergencyAdmins;
 
-    string constant NAME = "API Payment";
+    string constant NAME = "API_PAYMENT";
     string constant VERSION = "1";
 
     // 测试手动拼 EIP，合约内部是_hashTypedDataV4
