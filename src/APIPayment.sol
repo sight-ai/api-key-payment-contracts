@@ -9,8 +9,9 @@ import {ECDSA} from "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.s
 import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {EIP712} from "openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol";
 import {Pausable} from "openzeppelin-contracts/contracts/utils/Pausable.sol";
+import {Ownable2Step} from "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 
-contract APIPayment is Ownable, Pausable, EIP712 {
+contract APIPayment is Ownable2Step, Pausable, EIP712 {
     using SafeERC20 for IERC20;
 
     // 支持的token
@@ -130,4 +131,7 @@ contract APIPayment is Ownable, Pausable, EIP712 {
         require(supportedTokens[token], "Token not supported");
         IERC20(token).safeTransfer(to, amount);
     }
+
+    receive() external payable { revert("ETH not accepted"); }
+    fallback() external payable { revert("No fallback"); }
 }
