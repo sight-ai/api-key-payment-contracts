@@ -132,6 +132,11 @@ contract APIPayment is Ownable2Step, Pausable, EIP712 {
         IERC20(token).safeTransfer(to, amount);
     }
 
-    receive() external payable { revert("ETH not accepted"); }
-    fallback() external payable { revert("No fallback"); }
+    receive() external payable {
+        revert("ETH not accepted");
+    }
+
+    fallback() external payable {
+        revert("No fallback");
+    }
 }
