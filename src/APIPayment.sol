@@ -24,7 +24,6 @@ contract APIPayment is Ownable2Step, Pausable, EIP712 {
     mapping(address => uint256) public userNonce;
 
     // 多签紧急管理员，目前使用：简单数组+批准
-    // TODO 修改为Gnosis safe
     address[] public emergencyAdmins;
     mapping(address => bool) public isEmergencyAdmin;
     uint256 public pauseVotes;
@@ -32,8 +31,10 @@ contract APIPayment is Ownable2Step, Pausable, EIP712 {
 
     event Deposit(address indexed user, address indexed token, uint256 amount);
     event Withdraw(address indexed user, address indexed token, uint256 amount, uint256 nonce, uint256 timestamp);
-    event WithdrawDebug(bytes32 digest, address signer, address trustSigner);
     event PauseVote(address admin, uint256 votes, bool paused);
+    event UnpausedByVote(address indexed admin, uint256 votes);
+    event TrustedSignerUpdated(address indexed oldSigner, address indexed newSigner);
+    event SupportedTokenUpdated(address indexed token, bool isSupported);
 
     // EIP 712
     bytes32 public constant WITHDRAW_TYPEHASH = keccak256(
@@ -57,12 +58,18 @@ contract APIPayment is Ownable2Step, Pausable, EIP712 {
     }
 
     // 支持 owner 添加/移除支持的 token
+    // 撤销权限会拦住 withdraw 和 deposit
     function setSupportedToken(address token, bool isSupported) external onlyOwner {
+        require(token != address(0), "Token zero addr");
         supportedTokens[token] = isSupported;
+        emit SupportedTokenUpdated(token, isSupported);
     }
 
     function setTrustedSigner(address _trustedSigner) external onlyOwner {
+        require(trustedSigner != _trustedSigner, "Signer no change");
+        address old = trustedSigner;
         trustedSigner = _trustedSigner;
+        emit TrustedSignerUpdated(old, _trustedSigner);
     }
 
     // 紧急管理
@@ -87,6 +94,7 @@ contract APIPayment is Ownable2Step, Pausable, EIP712 {
         if (pauseVotes > 0) pauseVotes--;
         if (paused() && pauseVotes * 3 < emergencyAdmins.length * 2) {
             _unpause();
+            emit UnpausedByVote(msg.sender, pauseVotes);
         }
     }
 
@@ -111,16 +119,19 @@ contract APIPayment is Ownable2Step, Pausable, EIP712 {
         require(supportedTokens[token], "Token not supported");
         require(block.number <= validBeforeBlock, "Signature expired");
         require(nonce == userNonce[msg.sender] + 1, "Invalid nonce");
+        require(amount > 0, "Amount must be positive");
+        require(trustedSigner != address(0), "Signer disabled");
 
         // 组装 hash（EIP-712）
         bytes32 structHash =
             keccak256(abi.encode(WITHDRAW_TYPEHASH, msg.sender, token, amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = _hashTypedDataV4(structHash);
         address signer = ECDSA.recover(digest, signature);
-        emit WithdrawDebug(digest, signer, trustedSigner); // 新增调试事件
+        // emit WithdrawDebug(digest, signer, trustedSigner); // 新增调试事件
         require(signer == trustedSigner, "Invalid signature");
 
         userNonce[msg.sender] = nonce; // 先更新nonce再转账，防重入
+        require(IERC20(token).balanceOf(address(this)) >= amount, "Insufficient vault");
         IERC20(token).safeTransfer(msg.sender, amount);
 
         emit Withdraw(msg.sender, token, amount, nonce, timestamp);
@@ -128,7 +139,12 @@ contract APIPayment is Ownable2Step, Pausable, EIP712 {
 
     // owner可以转账合约中的balance
     function transferTo(address token, address to, uint256 amount) external onlyOwner {
-        require(supportedTokens[token], "Token not supported");
+        // require(supportedTokens[token], "Token not supported");
+        require(token != address(0), "zero token");
+        require(to != address(0), "zero to");
+        require(amount > 0, "Zero amount");
+        require(IERC20(token).balanceOf(address(this)) >= amount, "Insufficient vault");
+
         IERC20(token).safeTransfer(to, amount);
     }
 

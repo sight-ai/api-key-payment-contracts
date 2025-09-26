@@ -4,9 +4,9 @@ pragma solidity ^0.8.20;
 import "forge-std/Script.sol";
 import "../src/APIPayment.sol";
 
-contract DeployBase is Script {
+contract DeployBaseTest is Script {
     function run() external {
-        // 用助记词/私钥
+        // 用助记词推导私钥
         uint256 deployerPK;
         string memory pkMaybe = vm.envOr("PRIVATE_KEY", string(""));
         if (bytes(pkMaybe).length > 0) {
@@ -18,8 +18,8 @@ contract DeployBase is Script {
         }
         address deployer = vm.addr(deployerPK);
 
-        // Base 主网原生 USDC
-        address usdc = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+        // Base 测试网原生 USDC
+        address usdc = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
 
         // 配置受支持 token
         address[] memory tokens = new address[](1);
@@ -37,13 +37,20 @@ contract DeployBase is Script {
 
         APIPayment pay = new APIPayment(tokens, trustedSigner, emergencyAdmins, owner);
 
-        console2.log("== Base Mainnet Deployment ==");
+        console2.log("== Base Testnet Deployment ==");
         console2.log("Deployer:     %s", deployer);
         console2.log("USDC:         %s", usdc);
         console2.log("APIPayment:   %s", address(pay));
         console2.log("trustedSigner:%s", trustedSigner);
         console2.log("owner:        %s", owner);
-
+        console2.log("== admin lists ==");
+        for (uint256 i = 0; i < emergencyAdmins.length; i++) {
+            console2.log("admin[%s]:     %s", i, emergencyAdmins[i]);
+        }
+        // console2.log("== token lists ==");
+        // for (uint256 i = 0; i < tokens.length; i++) {
+        //     console2.log("token[%s]:     %s", i, tokens[i]);
+        // }
         vm.stopBroadcast();
     }
 }
