@@ -9,10 +9,15 @@ import "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 
 contract MockERC20 is ERC20 {
     constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
-    function mint(address to, uint256 amount) public { _mint(to, amount); }
+
+    function mint(address to, uint256 amount) public {
+        _mint(to, amount);
+    }
 }
 
-interface IReenter { function reenter() external; }
+interface IReenter {
+    function reenter() external;
+}
 
 contract EvilERC20 is ERC20 {
     address public immutable payment;
@@ -21,7 +26,9 @@ contract EvilERC20 is ERC20 {
         payment = _payment;
     }
 
-    function mint(address to, uint256 amount) public { _mint(to, amount); }
+    function mint(address to, uint256 amount) public {
+        _mint(to, amount);
+    }
 
     // ✅ OZ v5 写法：统一的内部钩子
     function _update(address from, address to, uint256 value) internal override {
@@ -30,7 +37,7 @@ contract EvilERC20 is ERC20 {
 
         // 当从 APIPayment 转出到“合约地址”时，尝试回调触发重入
         if (from == payment && to.code.length > 0) {
-            try IReenter(to).reenter() { } catch { }
+            try IReenter(to).reenter() {} catch {}
         }
     }
 }
@@ -52,7 +59,10 @@ contract ReentrantAttack is IReenter {
     }
 
     function prime(bytes memory _sig, uint256 _nonce, uint256 _validBeforeBlock, uint256 _ts) external {
-        sig = _sig; nonce_ = _nonce; validBeforeBlock_ = _validBeforeBlock; ts_ = _ts;
+        sig = _sig;
+        nonce_ = _nonce;
+        validBeforeBlock_ = _validBeforeBlock;
+        ts_ = _ts;
     }
 
     function attackOnce() external {
@@ -62,10 +72,9 @@ contract ReentrantAttack is IReenter {
     function reenter() external override {
         try payment.withdraw(address(token), 1e6, nonce_, validBeforeBlock_, ts_, sig) {
             revert("reenter should fail");
-        } catch { }
+        } catch {}
     }
 }
-
 
 // ====== 主测试 ======
 
@@ -523,6 +532,7 @@ contract APIPaymentTest is Test {
         assertEq(usdc.balanceOf(alice), 1_000_000e6 - 100e6 + amount);
         vm.stopPrank();
     }
+
     function testEvent_UnpausedByVote_Emitted() public {
         // 先达到暂停
         vm.prank(address(0x10));
@@ -543,10 +553,8 @@ contract APIPaymentTest is Test {
 
         for (uint256 i = 0; i < logs.length; i++) {
             if (
-                logs[i].emitter == address(payment) &&
-                logs[i].topics.length >= 2 &&
-                logs[i].topics[0] == topic0 &&
-                logs[i].topics[1] == expAdmin
+                logs[i].emitter == address(payment) && logs[i].topics.length >= 2 && logs[i].topics[0] == topic0
+                    && logs[i].topics[1] == expAdmin
             ) {
                 // data 里是 votes(uint256)
                 (uint256 votes) = abi.decode(logs[i].data, (uint256));
@@ -559,7 +567,7 @@ contract APIPaymentTest is Test {
     }
 
     function testEvent_TrustedSignerUpdated_Emitted() public {
-        address oldSigner = signer;           // setUp 里设置的 vm.addr(2)
+        address oldSigner = signer; // setUp 里设置的 vm.addr(2)
         address newSigner = vm.addr(77);
 
         vm.recordLogs();
@@ -574,11 +582,8 @@ contract APIPaymentTest is Test {
 
         for (uint256 i = 0; i < logs.length; i++) {
             if (
-                logs[i].emitter == address(payment) &&
-                logs[i].topics.length == 3 &&
-                logs[i].topics[0] == topic0 &&
-                logs[i].topics[1] == expOld &&
-                logs[i].topics[2] == expNew
+                logs[i].emitter == address(payment) && logs[i].topics.length == 3 && logs[i].topics[0] == topic0
+                    && logs[i].topics[1] == expOld && logs[i].topics[2] == expNew
             ) {
                 // 该事件两个参数都 indexed，data 为空
                 assertEq(logs[i].data.length, 0, "data should be empty");
@@ -604,10 +609,8 @@ contract APIPaymentTest is Test {
 
         for (uint256 i = 0; i < logs.length; i++) {
             if (
-                logs[i].emitter == address(payment) &&
-                logs[i].topics.length >= 2 &&
-                logs[i].topics[0] == topic0 &&
-                logs[i].topics[1] == expToken
+                logs[i].emitter == address(payment) && logs[i].topics.length >= 2 && logs[i].topics[0] == topic0
+                    && logs[i].topics[1] == expToken
             ) {
                 // data 里是 bool isSupported
                 (bool isSupported) = abi.decode(logs[i].data, (bool));
@@ -635,10 +638,8 @@ contract APIPaymentTest is Test {
 
         for (uint256 i = 0; i < logs.length; i++) {
             if (
-                logs[i].emitter == address(payment) &&
-                logs[i].topics.length >= 2 &&
-                logs[i].topics[0] == topic0 &&
-                logs[i].topics[1] == expToken
+                logs[i].emitter == address(payment) && logs[i].topics.length >= 2 && logs[i].topics[0] == topic0
+                    && logs[i].topics[1] == expToken
             ) {
                 (bool isSupported) = abi.decode(logs[i].data, (bool));
                 assertFalse(isSupported, "isSupported should be false");
