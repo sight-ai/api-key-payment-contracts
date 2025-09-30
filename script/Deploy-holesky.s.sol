@@ -5,38 +5,38 @@ import "forge-std/Script.sol";
 import "../src/APIPayment.sol";
 import "../src/MockERC20.sol";
 
-contract Deploy is Script {
+contract DeployHolesky is Script {
     function run() external {
-        // 助记词推导私钥（更安全，适用于本地和测试网）
+        // Derive private key from mnemonic (more secure for local and testnet)
         string memory mnemonic = vm.envString("MNEMONIC");
         uint256 deployerPK = vm.deriveKey(mnemonic, 0);
         address deployer = vm.addr(deployerPK);
         vm.startBroadcast(deployerPK);
 
-        // 1. 部署两个 MockERC20（USDC 和 USDT）
+        // 1. Deploy MockERC20 tokens (USDC and USDT)
         MockERC20 usdc = new MockERC20("SUSDC", "USDC");
         // MockERC20 usdt = new MockERC20("USDT", "USDT");
 
-        // 2. 给 deployer 各铸 1_000_000 个 token
+        // 2. Mint 1,000,000 tokens to deployer for testing
         usdc.mint(deployer, 1_000_000e6);
         // usdt.mint(deployer, 1_000_000e6);
 
-        // 3. 构造 tokens 数组
-        address[] memory tokens = new address[](2);
+        // 3. Configure supported tokens array
+        address[] memory tokens = new address[](1); // Fix: Only using 1 token
         tokens[0] = address(usdc);
         // tokens[1] = address(usdt);
 
-        // 4. 构造 trustedSigner、owner、emergencyAdmins
+        // 4. Configure trustedSigner, owner, and emergencyAdmins
         address trustedSigner = deployer;
         address owner = deployer;
         address[] memory emergencyAdmins = new address[](2);
         emergencyAdmins[0] = deployer;
-        emergencyAdmins[1] = address(0xdead);
+        emergencyAdmins[1] = 0x000000000000000000000000000000000000dEaD; // Note: Replace with real admin in production
 
-        // 5. 部署 APIPayment
+        // 5. Deploy APIPayment contract
         APIPayment pay = new APIPayment(tokens, trustedSigner, emergencyAdmins, owner);
 
-        // 打印合约地址方便记录
+        // Log deployed contract addresses for reference
         console.log("USDC:        %s", address(usdc));
         // console.log("USDT:        %s", address(usdt));
         console.log("APIPayment:  %s", address(pay));

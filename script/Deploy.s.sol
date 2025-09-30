@@ -14,9 +14,9 @@ import "../src/MockERC20.sol";
  * Usage:
  * 1. Start local network: `anvil`
  * 2. Export private key: `export PRIVATE_KEY=0x...`
- * 3. Run script: `forge script script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast --private-key $PRIVATE_KEY`
+ * 3. Run script: `forge script script/Deploy.s.sol:DeployLocal --rpc-url http://127.0.0.1:8545 --broadcast --private-key $PRIVATE_KEY`
  */
-contract Deploy is Script {
+contract DeployLocal is Script {
     /**
      * @notice Main deployment function
      * @dev Deploys MockERC20 tokens and APIPayment contract with initial configuration
@@ -49,7 +49,7 @@ contract Deploy is Script {
         // Configure emergency admins (2 required for testing multi-sig)
         address[] memory emergencyAdmins = new address[](2);
         emergencyAdmins[0] = msg.sender;
-        emergencyAdmins[1] = address(0xdead); // Placeholder for second admin
+        emergencyAdmins[1] = 0x000000000000000000000000000000000000dEaD; // Placeholder for second admin - replace in production
 
         // Log configuration
         console.log("=== Deployment Configuration ===");

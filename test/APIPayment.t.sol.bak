@@ -17,6 +17,7 @@ contract MockERC20 is ERC20 {
     }
 }
 
+
 interface IReenter {
     function reenter() external;
 }
@@ -392,7 +393,7 @@ contract APIPaymentTest is Test {
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
         uint256 timestamp = block.timestamp;
-
+        
         // Sign with wrong private key
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
         bytes32 structHash =
@@ -484,7 +485,7 @@ contract APIPaymentTest is Test {
         payment.withdraw(address(usdc), wrongAmount, nonce, validBeforeBlock, timestamp, sig);
         vm.stopPrank();
     }
-
+    
     function testReentrancyAttemptIsBlockedByNonce() public {
         // Malicious token + whitelist
         EvilERC20 evil = new EvilERC20(address(payment));

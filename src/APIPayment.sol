@@ -111,7 +111,6 @@ contract APIPayment is Ownable2Step, Pausable, EIP712 {
         }
     }
 
-
     // ============ Admin Functions ============
 
     /**
