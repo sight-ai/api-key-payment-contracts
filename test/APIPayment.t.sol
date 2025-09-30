@@ -33,9 +33,9 @@ contract EvilERC20 is ERC20 {
         _mint(to, amount);
     }
 
-    // ✅ OZ v5 写法：统一的内部钩子
+    // OZ v5 pattern: unified internal hook
     function _update(address from, address to, uint256 value) internal override {
-        // 先执行余额更新
+        // Execute balance update first
         super._update(from, to, value);
 
         // 当从 APIPayment 转出到“合约地址”时，尝试回调触发重入
@@ -45,7 +45,7 @@ contract EvilERC20 is ERC20 {
     }
 }
 
-// 尝试在代币转账回调期间二次调用 withdraw（应被 nonce 限制挡住）
+// Attempts to call withdraw again during token transfer callback (should be blocked by nonce)
 contract ReentrantAttack is IReenter {
     APIPayment public payment;
     IERC20 public token;
@@ -55,7 +55,7 @@ contract ReentrantAttack is IReenter {
     uint256 public validBeforeBlock_;
     uint256 public ts_;
 
-    // 🔧 这里需要 address payable（因为 APIPayment 有 payable fallback）
+    // Need address payable here (because APIPayment has payable fallback)
     constructor(address payable _payment, address _token) {
         payment = APIPayment(_payment);
         token = IERC20(_token);
@@ -79,7 +79,7 @@ contract ReentrantAttack is IReenter {
     }
 }
 
-// ====== 主测试 ======
+// ====== Main Tests ======
 
 contract APIPaymentTest is Test {
     APIPayment payment;
@@ -132,7 +132,7 @@ contract APIPaymentTest is Test {
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
         bytes32 structHash = keccak256(abi.encode(typehash, user, token, amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator(), structHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest); // 私钥2 -> signer
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(2, digest); // private key 2 -> signer
         return abi.encodePacked(r, s, v);
     }
 
@@ -145,16 +145,16 @@ contract APIPaymentTest is Test {
         usdt = new MockERC20("USDT", "USDT");
         signer = vm.addr(2);
 
-        // 资金
+        // Fund accounts
         usdc.mint(alice, 1_000_000e6);
         usdt.mint(alice, 1_000_000e6);
 
-        // 管理员
+        // Setup admins
         emergencyAdmins = new address[](2);
         emergencyAdmins[0] = address(0x10);
         emergencyAdmins[1] = address(0x11);
 
-        // 部署
+        // Deploy contracts
         tokens = new address[](2);
         tokens[0] = address(usdc);
         tokens[1] = address(usdt);
@@ -272,7 +272,7 @@ contract APIPaymentTest is Test {
 
         bytes memory sigNew = abi.encodePacked(r, s, v);
 
-        // 旧 signer 签名应失败
+        // Old signer signature should fail
         bytes memory sigOld = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
         vm.expectRevert("Invalid signature");
         payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sigOld);
@@ -287,7 +287,7 @@ contract APIPaymentTest is Test {
 
     function testSignerDisabledBlocksWithdraw() public {
         vm.prank(owner);
-        payment.setTrustedSigner(address(0)); // 熔断
+        payment.setTrustedSigner(address(0)); // Circuit breaker
 
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
@@ -487,19 +487,19 @@ contract APIPaymentTest is Test {
     }
     
     function testReentrancyAttemptIsBlockedByNonce() public {
-        // 恶意代币 + 白名单
+        // Malicious token + whitelist
         EvilERC20 evil = new EvilERC20(address(payment));
         vm.prank(owner);
         payment.setSupportedToken(address(evil), true);
 
-        // Alice 入金
+        // Alice deposits
         evil.mint(alice, 10e6);
         vm.startPrank(alice);
         evil.approve(address(payment), 10e6);
         payment.deposit(10e6, address(evil));
         vm.stopPrank();
 
-        // 攻击者
+        // Attacker setup
         ReentrantAttack attacker = new ReentrantAttack(payable(address(payment)), address(evil));
 
         uint256 nonce = 1;
@@ -508,7 +508,7 @@ contract APIPaymentTest is Test {
         bytes memory sig = signWithdraw(address(attacker), address(evil), 1e6, nonce, validBeforeBlock, timestamp);
 
         attacker.prime(sig, nonce, validBeforeBlock, timestamp);
-        attacker.attackOnce(); // 在转账回调中尝试二次 withdraw
+        attacker.attackOnce(); // Attempts second withdraw in transfer callback
 
         assertEq(payment.userNonce(address(attacker)), 1);
         assertEq(evil.balanceOf(address(attacker)), 1e6);
@@ -570,7 +570,7 @@ contract APIPaymentTest is Test {
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
 
-        // OZ v5 Pausable 自定义错误选择器
+        // OZ v5 Pausable custom error selector
         vm.expectRevert(bytes4(keccak256("EnforcedPause()")));
         payment.deposit(100e6, address(usdc));
 
@@ -586,17 +586,17 @@ contract APIPaymentTest is Test {
     }
 
     function testInsufficientVaultReverts() public {
-        // Alice 入金
+        // Alice deposits
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
         payment.deposit(100e6, address(usdc));
         vm.stopPrank();
 
-        // Owner 转空金库
+        // Owner empties the vault
         vm.prank(owner);
         payment.transferTo(address(usdc), owner, 100e6);
 
-        // 再提现失败
+        // Withdrawal should fail
         vm.startPrank(alice);
         uint256 amount = 10e6;
         uint256 nonce = 1;
@@ -630,14 +630,14 @@ contract APIPaymentTest is Test {
     }
 
     function testEvent_UnpausedByVote_Emitted() public {
-        // 先达到暂停
+        // First achieve pause state
         vm.prank(address(0x10));
         payment.votePause();
         vm.prank(address(0x11));
         payment.votePause();
         assertTrue(payment.paused(), "precondition: paused");
 
-        // 期望：由 0x11 发起的 voteUnpause 触发 UnpausedByVote(admin=0x11, votes=1)
+        // Expected: voteUnpause by 0x11 triggers UnpausedByVote(admin=0x11, votes=1)
         vm.recordLogs();
         vm.prank(address(0x11));
         payment.voteUnpause();
@@ -652,7 +652,7 @@ contract APIPaymentTest is Test {
                 logs[i].emitter == address(payment) && logs[i].topics.length >= 2 && logs[i].topics[0] == topic0
                     && logs[i].topics[1] == expAdmin
             ) {
-                // data 里是 votes(uint256)
+                // data contains votes(uint256)
                 (uint256 votes) = abi.decode(logs[i].data, (uint256));
                 assertEq(votes, 1, "votes");
                 found = true;
@@ -663,7 +663,7 @@ contract APIPaymentTest is Test {
     }
 
     function testEvent_TrustedSignerUpdated_Emitted() public {
-        address oldSigner = signer; // setUp 里设置的 vm.addr(2)
+        address oldSigner = signer; // Set in setUp as vm.addr(2)
         address newSigner = vm.addr(77);
 
         vm.recordLogs();
@@ -681,7 +681,7 @@ contract APIPaymentTest is Test {
                 logs[i].emitter == address(payment) && logs[i].topics.length == 3 && logs[i].topics[0] == topic0
                     && logs[i].topics[1] == expOld && logs[i].topics[2] == expNew
             ) {
-                // 该事件两个参数都 indexed，data 为空
+                // Both event parameters are indexed, data is empty
                 assertEq(logs[i].data.length, 0, "data should be empty");
                 found = true;
                 break;
@@ -691,7 +691,7 @@ contract APIPaymentTest is Test {
     }
 
     function testEvent_SupportedTokenUpdated_AddEmitted() public {
-        // 新增一个未在构造器里白名单的 token
+        // Add a token not whitelisted in constructor
         MockERC20 fake = new MockERC20("FAKE", "FAKE");
 
         vm.recordLogs();
@@ -708,7 +708,7 @@ contract APIPaymentTest is Test {
                 logs[i].emitter == address(payment) && logs[i].topics.length >= 2 && logs[i].topics[0] == topic0
                     && logs[i].topics[1] == expToken
             ) {
-                // data 里是 bool isSupported
+                // data contains bool isSupported
                 (bool isSupported) = abi.decode(logs[i].data, (bool));
                 assertTrue(isSupported, "isSupported should be true");
                 found = true;
@@ -720,7 +720,7 @@ contract APIPaymentTest is Test {
     }
 
     function testEvent_SupportedTokenUpdated_RemoveEmitted() public {
-        // 构造器默认已支持 usdc；这里将其移除
+        // Constructor already supports usdc; remove it here
         assertTrue(payment.supportedTokens(address(usdc)), "precondition failed");
 
         vm.recordLogs();
