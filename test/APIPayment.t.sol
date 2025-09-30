@@ -5,6 +5,10 @@ import "forge-std/Test.sol";
 import "../src/APIPayment.sol";
 import "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 
+/**
+ * @title MockERC20 for Testing
+ * @notice Simple ERC20 implementation with mint function for test setup
+ */
 contract MockERC20 is ERC20 {
     constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
 
@@ -13,6 +17,13 @@ contract MockERC20 is ERC20 {
     }
 }
 
+/**
+ * @title APIPaymentTest
+ * @author SightAI Team
+ * @notice Comprehensive test suite for the APIPayment contract
+ * @dev Tests cover all major functionality including deposits, withdrawals,
+ *      signature verification, access control, and emergency pause mechanisms
+ */
 contract APIPaymentTest is Test {
     APIPayment payment;
     MockERC20 usdc;
@@ -25,7 +36,11 @@ contract APIPaymentTest is Test {
     string constant NAME = "API_PAYMENT";
     string constant VERSION = "1";
 
-    // 测试手动拼 EIP，合约内部是_hashTypedDataV4
+    /**
+     * @notice Computes the EIP-712 domain separator
+     * @dev Used to construct valid signatures for testing
+     * @return The domain separator hash
+     */
     function domainSeparator() internal view returns (bytes32) {
         return keccak256(
             abi.encode(
@@ -38,6 +53,16 @@ contract APIPaymentTest is Test {
         );
     }
 
+    /**
+     * @notice Helper function to create valid withdrawal signatures
+     * @param user Address of the user withdrawing
+     * @param token Token address
+     * @param amount Amount to withdraw
+     * @param nonce User's nonce
+     * @param validBeforeBlock Signature expiration block
+     * @param timestamp Timestamp for tracking
+     * @return Packed signature bytes (r, s, v)
+     */
     function signWithdraw(
         address user,
         address token,
@@ -53,6 +78,10 @@ contract APIPaymentTest is Test {
         return abi.encodePacked(r, s, v);
     }
 
+    /**
+     * @notice Sets up the test environment before each test
+     * @dev Deploys contracts, mints tokens, and configures initial state
+     */
     function setUp() public {
         usdc = new MockERC20("USDC", "USDC");
         usdt = new MockERC20("USDT", "USDT");
@@ -75,6 +104,10 @@ contract APIPaymentTest is Test {
         payment = new APIPayment(tokens, signer, emergencyAdmins, owner);
     }
 
+    /**
+     * @notice Tests the complete deposit and withdrawal flow
+     * @dev Verifies balances, nonce updates, and event emissions
+     */
     function testDepositAndWithdraw() public {
         vm.startPrank(alice);
 
@@ -99,6 +132,9 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests that deposit function emits the correct event
+     */
     function testDepositEmitsEvent() public {
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
@@ -117,6 +153,9 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests that withdrawal function emits the correct event
+     */
     function testWithdrawEmitsEvent() public {
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
@@ -143,6 +182,10 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests owner's ability to transfer contract funds
+     * @dev Emergency function for fund recovery
+     */
     function testOwnerCanTransferTo() public {
         usdc.mint(address(payment), 100e6);
         uint256 before = usdc.balanceOf(owner);
@@ -152,6 +195,10 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests owner's ability to update the trusted signer
+     * @dev Verifies old signatures become invalid after signer change
+     */
     function testOwnerCanSetTrustedSigner() public {
         vm.startPrank(owner);
         address newSigner = vm.addr(55);
@@ -168,7 +215,7 @@ contract APIPaymentTest is Test {
         uint256 validBeforeBlock = block.number + 100;
         uint256 timestamp = block.timestamp;
 
-        // 用新signer签名
+        // Sign with new signer
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
         bytes32 structHash =
             keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock, timestamp));
@@ -176,7 +223,7 @@ contract APIPaymentTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(55, digest);
         bytes memory sig = abi.encodePacked(r, s, v);
 
-        // 用旧signer签名应该失败
+        // Signing with old signer should fail
         bytes memory sig2 = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
 
         vm.expectRevert("Invalid signature");
@@ -191,6 +238,9 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests that depositing unsupported tokens reverts
+     */
     function testDepositNotSupportedTokenReverts() public {
         MockERC20 fakeToken = new MockERC20("FAKE", "FAKE");
         fakeToken.mint(alice, 100e6);
@@ -201,6 +251,9 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests that withdrawing unsupported tokens reverts
+     */
     function testWithdrawNotSupportedTokenReverts() public {
         MockERC20 fakeToken = new MockERC20("FAKE", "FAKE");
         uint256 amount = 10e6;
@@ -215,11 +268,18 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests nonce validation to prevent replay attacks
+     * @dev Verifies that:
+     * - Same nonce cannot be used twice
+     * - Nonces must increment sequentially
+     * - Wrong nonce values are rejected
+     */
     function testWithdrawNonceChecks() public {
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
         payment.deposit(100e6, address(usdc));
-        // 第一次提现
+        // First withdrawal
         uint256 amount = 10e6;
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
@@ -227,21 +287,24 @@ contract APIPaymentTest is Test {
         bytes memory sig1 = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
         payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig1);
 
-        // 再次用同样nonce
+        // Try again with same nonce
         vm.expectRevert("Invalid nonce");
         payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig1);
 
-        // 用更小的nonce
+        // Try with smaller nonce
         vm.expectRevert("Invalid nonce");
         payment.withdraw(address(usdc), amount, nonce - 1, validBeforeBlock, timestamp, sig1);
 
-        // 用更大的nonce
+        // Try with larger nonce
         uint256 nonce2 = 2;
         bytes memory sig2 = signWithdraw(alice, address(usdc), amount, nonce2, validBeforeBlock, timestamp);
         payment.withdraw(address(usdc), amount, nonce2, validBeforeBlock, timestamp, sig2);
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests signature expiration based on block number
+     */
     function testWithdrawBlockExpired() public {
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
@@ -251,12 +314,15 @@ contract APIPaymentTest is Test {
         uint256 validBeforeBlock = block.number + 1;
         uint256 timestamp = block.timestamp;
         bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
-        vm.roll(validBeforeBlock + 1); // 跳区块
+        vm.roll(validBeforeBlock + 1); // Skip blocks
         vm.expectRevert("Signature expired");
         payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig);
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests rejection of signatures from wrong signer
+     */
     function testWithdrawInvalidSignature() public {
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
@@ -265,7 +331,7 @@ contract APIPaymentTest is Test {
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
         uint256 timestamp = block.timestamp;
-        // 用错误的私钥签名
+        // Sign with wrong private key
         bytes32 typehash = payment.WITHDRAW_TYPEHASH();
         bytes32 structHash =
             keccak256(abi.encode(typehash, alice, address(usdc), amount, nonce, validBeforeBlock, timestamp));
@@ -278,6 +344,10 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests that signatures for different recipients are rejected
+     * @dev Prevents signature misuse across different users
+     */
     function testWithdrawWrongReceiver() public {
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
@@ -300,6 +370,10 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests that nonces are tracked separately per user
+     * @dev Each user has independent nonce counter
+     */
     function testWithdrawNoncePerUser() public {
         address bob = address(0xB0B);
 
@@ -331,6 +405,9 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests that amount tampering invalidates signature
+     */
     function testWithdrawInvalidAmountSignature() public {
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
@@ -350,6 +427,10 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Tests reentrancy protection
+     * @dev Verifies nonce update prevents reentrancy attacks
+     */
     function testNoReentrancy() public {
         ReentrantAttack attacker = new ReentrantAttack(address(payment), address(usdc));
 
@@ -370,41 +451,55 @@ contract APIPaymentTest is Test {
         assertEq(usdc.balanceOf(address(attacker)), 11e6);
     }
 
+    /**
+     * @notice Tests multi-sig pause mechanism
+     * @dev Requires 2/3 majority of emergency admins to pause
+     */
     function testPauseByMajorityAdmin() public {
-        // 两个emergencyAdmins, 2/3 规则即都同意才可pause
-        // 1号投票
+        // Two emergencyAdmins, 2/3 rule means both must agree to pause
+        // First admin votes
         vm.prank(address(0x10));
         payment.votePause();
         assertFalse(payment.paused(), "Paused too early");
-        // 2号投票
+        // Second admin votes
         vm.prank(address(0x11));
         payment.votePause();
         assertTrue(payment.paused(), "Should be paused after 2 votes");
     }
 
+    /**
+     * @notice Tests that insufficient votes don't pause contract
+     */
     function testPauseNotEnoughVotes() public {
-        // 只有一个admin投票，不足多数，不能pause
+        // Only one admin voting, not enough for majority, cannot pause
         vm.prank(address(0x10));
         payment.votePause();
         assertFalse(payment.paused(), "Should NOT be paused with only one vote");
     }
 
+    /**
+     * @notice Tests unpause mechanism when votes drop below threshold
+     */
     function testUnpauseByAdmin() public {
-        // 两票pause
+        // Two votes to pause
         vm.prank(address(0x10));
         payment.votePause();
         vm.prank(address(0x11));
         payment.votePause();
         assertTrue(payment.paused(), "Should be paused now");
 
-        // 取消1票, 应可unpause
+        // Revoke one vote, should unpause
         vm.prank(address(0x11));
         payment.voteUnpause();
         assertFalse(payment.paused(), "Should be unpaused when votes < 2/3");
     }
 
+    /**
+     * @notice Tests that pause blocks all critical operations
+     * @dev Both deposits and withdrawals should revert when paused
+     */
     function testPauseDisablesDepositAndWithdraw() public {
-        // 两票pause
+        // Two votes to pause
         vm.prank(address(0x10));
         payment.votePause();
         vm.prank(address(0x11));
@@ -426,9 +521,12 @@ contract APIPaymentTest is Test {
         vm.stopPrank();
     }
 
-    // 测试切换到_hashTypedDataV4后，合约正确工作
+    /**
+     * @notice Tests EIP-712 signature verification
+     * @dev Ensures _hashTypedDataV4 implementation works correctly
+     */
     function testEIP712TypedDataSignatureWorks() public {
-        // 测试EIP712切换后签名有效
+        // Test that EIP712 signature verification works correctly
         vm.startPrank(alice);
         usdc.approve(address(payment), 100e6);
         payment.deposit(100e6, address(usdc));
@@ -436,7 +534,7 @@ contract APIPaymentTest is Test {
         uint256 nonce = 1;
         uint256 validBeforeBlock = block.number + 100;
         uint256 timestamp = block.timestamp;
-        // 用主流程 signWithdraw 即为EIP712格式
+        // Use main signWithdraw function which uses EIP712 format
         bytes memory sig = signWithdraw(alice, address(usdc), amount, nonce, validBeforeBlock, timestamp);
         payment.withdraw(address(usdc), amount, nonce, validBeforeBlock, timestamp, sig);
         assertEq(usdc.balanceOf(alice), 1_000_000e6 - 100e6 + amount);
@@ -444,6 +542,11 @@ contract APIPaymentTest is Test {
     }
 }
 
+/**
+ * @title ReentrantAttack
+ * @notice Malicious contract attempting reentrancy attack
+ * @dev Used to test reentrancy protection in withdraw function
+ */
 contract ReentrantAttack {
     APIPayment public payment;
     IERC20 public usdc;

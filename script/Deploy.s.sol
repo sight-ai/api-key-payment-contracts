@@ -5,36 +5,66 @@ import "forge-std/Script.sol";
 import "../src/APIPayment.sol";
 import "../src/MockERC20.sol";
 
+/**
+ * @title Deploy Script
+ * @author SightAI Team
+ * @notice Deployment script for local testing of the APIPayment system
+ * @dev Deploys mock tokens and the payment contract with test configuration
+ *
+ * Usage:
+ * 1. Start local network: `anvil`
+ * 2. Export private key: `export PRIVATE_KEY=0x...`
+ * 3. Run script: `forge script script/Deploy.s.sol:Deploy --rpc-url http://127.0.0.1:8545 --broadcast --private-key $PRIVATE_KEY`
+ */
 contract Deploy is Script {
+    /**
+     * @notice Main deployment function
+     * @dev Deploys MockERC20 tokens and APIPayment contract with initial configuration
+     *
+     * Deployment steps:
+     * 1. Deploy mock USDC token
+     * 2. Mint initial tokens for testing
+     * 3. Configure and deploy APIPayment contract
+     * 4. Log deployment addresses for reference
+     */
     function run() external {
-        // 读取当前私钥（anvil第一个账户）
+        // Read deployer private key from environment
         uint256 deployerPK = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPK);
 
-        // 1. 部署两个 MockERC20（usdc, usdt）
+        // Step 1: Deploy Mock ERC20 token (simulating USDC)
         MockERC20 usdc = new MockERC20("USDC", "USDC");
 
-        // 2. 铸币（测试用，给deployer预置余额）
+        // Step 2: Mint initial tokens for testing (1M USDC with 6 decimals)
         usdc.mint(msg.sender, 1_000_000e6);
 
-        // 3. 部署 APIPayment
-        address[] memory tokens = new address[](2);
+        // Step 3: Configure APIPayment deployment parameters
+        address[] memory tokens = new address[](1);
         tokens[0] = address(usdc);
 
-        // trustedSigner、owner、emergencyAdmins 可直接用 msg.sender 作为演示
+        // For local testing, use deployer as all administrative roles
         address trustedSigner = msg.sender;
         address owner = msg.sender;
+
+        // Configure emergency admins (2 required for testing multi-sig)
         address[] memory emergencyAdmins = new address[](2);
         emergencyAdmins[0] = msg.sender;
-        emergencyAdmins[1] = address(0xdead);
+        emergencyAdmins[1] = address(0xdead); // Placeholder for second admin
 
-        console.log("trustedSigner: %s", trustedSigner);
-        console.log("owner:        %s", owner);
+        // Log configuration
+        console.log("=== Deployment Configuration ===");
+        console.log("Trusted Signer: %s", trustedSigner);
+        console.log("Owner:          %s", owner);
 
+        // Step 4: Deploy APIPayment contract
         APIPayment pay = new APIPayment(tokens, trustedSigner, emergencyAdmins, owner);
 
-        console.log("USDC: %s", address(usdc));
-        console.log("APIPayment: %s", address(pay));
+        // Log deployed addresses
+        console.log("\n=== Deployed Contracts ===");
+        console.log("MockERC20 (USDC): %s", address(usdc));
+        console.log("APIPayment:       %s", address(pay));
+        console.log("\n=== Initial Setup Complete ===");
+        console.log("Deployer has 1,000,000 USDC for testing");
 
         vm.stopBroadcast();
     }

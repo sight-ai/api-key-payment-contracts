@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// import "forge-std/console.sol";
-
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
@@ -10,95 +8,192 @@ import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {EIP712} from "openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol";
 import {Pausable} from "openzeppelin-contracts/contracts/utils/Pausable.sol";
 
+/**
+ * @title APIPayment
+ * @author SightAI Team
+ * @notice Manages API key payments with ERC20 tokens using signature-based withdrawals
+ * @dev Implements EIP-712 for secure signature verification and multi-sig emergency controls
+ *
+ * This contract enables:
+ * - Users to deposit supported ERC20 tokens for API usage
+ * - Backend-authorized withdrawals via EIP-712 signatures
+ * - Emergency pause mechanism with multi-signature voting
+ * - Owner-controlled token whitelist and configuration
+ */
 contract APIPayment is Ownable, Pausable, EIP712 {
     using SafeERC20 for IERC20;
 
-    // 支持的token
+    // ============ State Variables ============
+
+    /// @notice Mapping of supported ERC20 tokens
+    /// @dev token address => is supported
     mapping(address => bool) public supportedTokens;
 
-    // 后端生成 withdraw 签名的密钥
+    /// @notice Address authorized to sign withdrawal requests
+    /// @dev Should be a secure backend wallet
     address public trustedSigner;
 
-    // 用户 withdraw nonce
+    /// @notice Tracks user withdrawal nonces to prevent replay attacks
+    /// @dev user address => current nonce
     mapping(address => uint256) public userNonce;
 
-    // 多签紧急管理员，目前使用：简单数组+批准
-    // TODO 修改为Gnosis safe
+    /// @notice List of emergency admin addresses
+    /// @dev Used for multi-sig pause functionality
     address[] public emergencyAdmins;
+
+    /// @notice Mapping to check if an address is an emergency admin
     mapping(address => bool) public isEmergencyAdmin;
+
+    /// @notice Current number of votes for pausing the contract
     uint256 public pauseVotes;
+
+    /// @notice Tracks if an admin has voted for pause
+    /// @dev admin address => has voted
     mapping(address => bool) public hasVotedPause;
 
+    // ============ Events ============
+
+    /// @notice Emitted when a user deposits tokens
+    /// @param user Address of the depositor
+    /// @param token Address of the deposited token
+    /// @param amount Amount of tokens deposited
     event Deposit(address indexed user, address indexed token, uint256 amount);
+
+    /// @notice Emitted when a user withdraws tokens
+    /// @param user Address of the withdrawer
+    /// @param token Address of the withdrawn token
+    /// @param amount Amount of tokens withdrawn
+    /// @param nonce Nonce used for this withdrawal
+    /// @param timestamp Timestamp included in the signature
     event Withdraw(address indexed user, address indexed token, uint256 amount, uint256 nonce, uint256 timestamp);
-    event WithdrawDebug(bytes32 digest, address signer, address trustSigner);
+
+    /// @notice Emitted when an admin votes for pause/unpause
+    /// @param admin Address of the voting admin
+    /// @param votes Current total votes
+    /// @param paused Whether the contract is now paused
     event PauseVote(address admin, uint256 votes, bool paused);
 
-    // EIP 712
+    // ============ Constants ============
+
+    /// @notice EIP-712 type hash for withdrawal authorization
     bytes32 public constant WITHDRAW_TYPEHASH = keccak256(
         "Withdraw(address recipient,address token,uint256 amount,uint256 nonce,uint256 validBeforeBlock,uint256 timestamp)"
     );
 
+    // ============ Constructor ============
+
+    /**
+     * @notice Initializes the payment contract with configuration
+     * @param tokens Array of initially supported ERC20 token addresses
+     * @param _trustedSigner Address authorized to sign withdrawal requests
+     * @param _emergencyAdmins Array of emergency admin addresses for pause functionality
+     * @param _owner Address that will own the contract
+     */
     constructor(address[] memory tokens, address _trustedSigner, address[] memory _emergencyAdmins, address _owner)
         Ownable(_owner)
         EIP712("API_PAYMENT", "1")
     {
-        // 初始化支持的token
+        // Initialize supported tokens
         for (uint256 i = 0; i < tokens.length; i++) {
             supportedTokens[tokens[i]] = true;
         }
+
         trustedSigner = _trustedSigner;
-        // 初始化紧急管理员
+
+        // Initialize emergency admins
         for (uint256 i = 0; i < _emergencyAdmins.length; i++) {
             emergencyAdmins.push(_emergencyAdmins[i]);
             isEmergencyAdmin[_emergencyAdmins[i]] = true;
         }
     }
 
-    // 支持 owner 添加/移除支持的 token
+    // ============ Admin Functions ============
+
+    /**
+     * @notice Updates whether a token is supported for deposits/withdrawals
+     * @dev Only callable by contract owner
+     * @param token Address of the ERC20 token
+     * @param isSupported Whether the token should be supported
+     */
     function setSupportedToken(address token, bool isSupported) external onlyOwner {
         supportedTokens[token] = isSupported;
     }
 
+    /**
+     * @notice Updates the trusted signer address for withdrawal authorization
+     * @dev Only callable by contract owner. Ensure new signer is secure
+     * @param _trustedSigner New trusted signer address
+     */
     function setTrustedSigner(address _trustedSigner) external onlyOwner {
         trustedSigner = _trustedSigner;
     }
 
-    // 紧急管理
-    // 2/3 多签投票暂停
+    // ============ Emergency Functions ============
+
+    /**
+     * @notice Allows emergency admin to vote for pausing the contract
+     * @dev Requires 2/3 majority of emergency admins to pause
+     * Each admin can only vote once until they vote to unpause
+     */
     function votePause() external {
         require(isEmergencyAdmin[msg.sender], "Not admin");
         require(!hasVotedPause[msg.sender], "Already voted");
+
         hasVotedPause[msg.sender] = true;
         pauseVotes++;
         emit PauseVote(msg.sender, pauseVotes, false);
 
+        // Check if we have 2/3 majority
         if (pauseVotes * 3 >= emergencyAdmins.length * 2) {
             _pause();
             emit PauseVote(msg.sender, pauseVotes, true);
         }
     }
 
+    /**
+     * @notice Allows emergency admin to revoke their pause vote
+     * @dev Will unpause the contract if votes fall below 2/3 majority
+     */
     function voteUnpause() external {
         require(isEmergencyAdmin[msg.sender], "Not admin");
         require(hasVotedPause[msg.sender], "Did not vote yet");
+
         hasVotedPause[msg.sender] = false;
         if (pauseVotes > 0) pauseVotes--;
+
+        // Unpause if we no longer have 2/3 majority
         if (paused() && pauseVotes * 3 < emergencyAdmins.length * 2) {
             _unpause();
         }
     }
 
-    // deposit
+    // ============ Core Functions ============
+
+    /**
+     * @notice Allows users to deposit supported ERC20 tokens
+     * @dev Requires prior token approval. Tokens are held by this contract
+     * @param amount Amount of tokens to deposit
+     * @param token Address of the ERC20 token to deposit
+     */
     function deposit(uint256 amount, address token) external whenNotPaused {
         require(supportedTokens[token], "Token not supported");
         require(amount > 0, "Amount must be positive");
-        // transferFrom
+
+        // Transfer tokens from user to contract
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
         emit Deposit(msg.sender, token, amount);
     }
 
-    // withdraw（user/provider claim）
+    /**
+     * @notice Allows users to withdraw tokens with a valid backend signature
+     * @dev Signature must be generated by trusted signer with correct nonce
+     * @param token Address of the ERC20 token to withdraw
+     * @param amount Amount of tokens to withdraw
+     * @param nonce Expected nonce (must be current nonce + 1)
+     * @param validBeforeBlock Block number before which the signature is valid
+     * @param timestamp Timestamp included in the signature for tracking
+     * @param signature EIP-712 signature from trusted signer
+     */
     function withdraw(
         address token,
         uint256 amount,
@@ -111,21 +206,29 @@ contract APIPayment is Ownable, Pausable, EIP712 {
         require(block.number <= validBeforeBlock, "Signature expired");
         require(nonce == userNonce[msg.sender] + 1, "Invalid nonce");
 
-        // 组装 hash（EIP-712）
+        // Verify EIP-712 signature
         bytes32 structHash =
             keccak256(abi.encode(WITHDRAW_TYPEHASH, msg.sender, token, amount, nonce, validBeforeBlock, timestamp));
         bytes32 digest = _hashTypedDataV4(structHash);
         address signer = ECDSA.recover(digest, signature);
-        emit WithdrawDebug(digest, signer, trustedSigner); // 新增调试事件
+
         require(signer == trustedSigner, "Invalid signature");
 
-        userNonce[msg.sender] = nonce; // 先更新nonce再转账，防重入
-        IERC20(token).safeTransfer(msg.sender, amount);
+        // Update nonce before transfer to prevent reentrancy
+        userNonce[msg.sender] = nonce;
 
+        // Transfer tokens to user
+        IERC20(token).safeTransfer(msg.sender, amount);
         emit Withdraw(msg.sender, token, amount, nonce, timestamp);
     }
 
-    // owner可以转账合约中的balance
+    /**
+     * @notice Allows owner to transfer contract balance to any address
+     * @dev Emergency function for recovering funds. Only callable by owner
+     * @param token Address of the ERC20 token to transfer
+     * @param to Recipient address
+     * @param amount Amount of tokens to transfer
+     */
     function transferTo(address token, address to, uint256 amount) external onlyOwner {
         require(supportedTokens[token], "Token not supported");
         IERC20(token).safeTransfer(to, amount);
