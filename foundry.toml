@@ -3,4 +3,7 @@ src = "src"
 out = "out"
 libs = ["lib"]
 
+[rpc_endpoints]
+holesky = "https://divine-muddy-diagram.ethereum-holesky.quiknode.pro/c2ecb61da01180ba50613ee7d9c387d4b9ca91c2/"
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

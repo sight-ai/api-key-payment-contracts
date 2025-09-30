@@ -7,6 +7,7 @@ import {ECDSA} from "openzeppelin-contracts/contracts/utils/cryptography/ECDSA.s
 import {Ownable} from "openzeppelin-contracts/contracts/access/Ownable.sol";
 import {EIP712} from "openzeppelin-contracts/contracts/utils/cryptography/EIP712.sol";
 import {Pausable} from "openzeppelin-contracts/contracts/utils/Pausable.sol";
+import {Ownable2Step} from "openzeppelin-contracts/contracts/access/Ownable2Step.sol";
 
 /**
  * @title APIPayment
@@ -20,7 +21,7 @@ import {Pausable} from "openzeppelin-contracts/contracts/utils/Pausable.sol";
  * - Emergency pause mechanism with multi-signature voting
  * - Owner-controlled token whitelist and configuration
  */
-contract APIPayment is Ownable, Pausable, EIP712 {
+contract APIPayment is Ownable2Step, Pausable, EIP712 {
     using SafeERC20 for IERC20;
 
     // ============ State Variables ============
@@ -72,6 +73,9 @@ contract APIPayment is Ownable, Pausable, EIP712 {
     /// @param votes Current total votes
     /// @param paused Whether the contract is now paused
     event PauseVote(address admin, uint256 votes, bool paused);
+    event UnpausedByVote(address indexed admin, uint256 votes);
+    event TrustedSignerUpdated(address indexed oldSigner, address indexed newSigner);
+    event SupportedTokenUpdated(address indexed token, bool isSupported);
 
     // ============ Constants ============
 
@@ -107,6 +111,7 @@ contract APIPayment is Ownable, Pausable, EIP712 {
         }
     }
 
+
     // ============ Admin Functions ============
 
     /**
@@ -116,7 +121,9 @@ contract APIPayment is Ownable, Pausable, EIP712 {
      * @param isSupported Whether the token should be supported
      */
     function setSupportedToken(address token, bool isSupported) external onlyOwner {
+        require(token != address(0), "Token zero addr");
         supportedTokens[token] = isSupported;
+        emit SupportedTokenUpdated(token, isSupported);
     }
 
     /**
@@ -125,7 +132,10 @@ contract APIPayment is Ownable, Pausable, EIP712 {
      * @param _trustedSigner New trusted signer address
      */
     function setTrustedSigner(address _trustedSigner) external onlyOwner {
+        require(trustedSigner != _trustedSigner, "Signer no change");
+        address old = trustedSigner;
         trustedSigner = _trustedSigner;
+        emit TrustedSignerUpdated(old, _trustedSigner);
     }
 
     // ============ Emergency Functions ============
@@ -164,6 +174,7 @@ contract APIPayment is Ownable, Pausable, EIP712 {
         // Unpause if we no longer have 2/3 majority
         if (paused() && pauseVotes * 3 < emergencyAdmins.length * 2) {
             _unpause();
+            emit UnpausedByVote(msg.sender, pauseVotes);
         }
     }
 
@@ -205,6 +216,8 @@ contract APIPayment is Ownable, Pausable, EIP712 {
         require(supportedTokens[token], "Token not supported");
         require(block.number <= validBeforeBlock, "Signature expired");
         require(nonce == userNonce[msg.sender] + 1, "Invalid nonce");
+        require(amount > 0, "Amount must be positive");
+        require(trustedSigner != address(0), "Signer disabled");
 
         // Verify EIP-712 signature
         bytes32 structHash =
@@ -214,11 +227,10 @@ contract APIPayment is Ownable, Pausable, EIP712 {
 
         require(signer == trustedSigner, "Invalid signature");
 
-        // Update nonce before transfer to prevent reentrancy
-        userNonce[msg.sender] = nonce;
-
-        // Transfer tokens to user
+        userNonce[msg.sender] = nonce; // reentry protection
+        require(IERC20(token).balanceOf(address(this)) >= amount, "Insufficient vault");
         IERC20(token).safeTransfer(msg.sender, amount);
+
         emit Withdraw(msg.sender, token, amount, nonce, timestamp);
     }
 
@@ -230,7 +242,20 @@ contract APIPayment is Ownable, Pausable, EIP712 {
      * @param amount Amount of tokens to transfer
      */
     function transferTo(address token, address to, uint256 amount) external onlyOwner {
-        require(supportedTokens[token], "Token not supported");
+        // require(supportedTokens[token], "Token not supported");
+        require(token != address(0), "zero token");
+        require(to != address(0), "zero to");
+        require(amount > 0, "Zero amount");
+        require(IERC20(token).balanceOf(address(this)) >= amount, "Insufficient vault");
+
         IERC20(token).safeTransfer(to, amount);
+    }
+
+    receive() external payable {
+        revert("ETH not accepted");
+    }
+
+    fallback() external payable {
+        revert("No fallback");
     }
 }
